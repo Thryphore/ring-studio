@@ -2,19 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { IdleRotation } from "../src/idle-rotation.js";
 
-test("idle rotation waits, eases into a slow turn, and stops immediately on contact", () => {
+test("idle rotation starts immediately, eases into a fast turn, and stops on contact", () => {
   const motion = new IdleRotation({ enabled: true }, 1000);
-  assert.equal(motion.sample(4499).spinning, false);
-  assert.equal(motion.sample(4500).speed, 0);
-  assert.ok(motion.sample(5400).speed > 0);
-  assert.ok(motion.sample(5400).speed < 0.42);
-  assert.equal(motion.sample(6300).speed, 0.42);
-  motion.hold("finger", 6400);
+  assert.equal(motion.sample(1000).speed, 0);
+  assert.ok(motion.sample(1225).speed > 0);
+  assert.ok(motion.sample(1225).speed < 2.4);
+  assert.equal(motion.sample(1450).speed, 2.4);
+  motion.hold("finger", 1500);
   assert.equal(motion.sample(20000).spinning, false);
   motion.release("finger", 20000);
-  assert.equal(motion.sample(23499).spinning, false);
-  motion.sample(23500);
-  assert.equal(motion.sample(25300).speed, 0.42);
+  assert.equal(motion.sample(20000).speed, 0);
+  motion.sample(20000);
+  assert.equal(motion.sample(20450).speed, 2.4);
 });
 
 test("releasing one of several contacts cannot restart the turntable", () => {
@@ -24,22 +23,23 @@ test("releasing one of several contacts cannot restart the turntable", () => {
   motion.release("finger-one", 2400);
   assert.equal(motion.sample(20000).spinning, false);
   motion.release("finger-two", 21000);
-  assert.equal(motion.sample(24499).spinning, false);
-  motion.sample(24500);
-  assert.equal(motion.sample(26300).speed, 0.42);
+  assert.equal(motion.sample(21000).speed, 0);
+  motion.sample(21000);
+  assert.equal(motion.sample(21450).speed, 2.4);
 });
 
 test("pointer-free activity postpones motion and manual pause remains off", () => {
   const motion = new IdleRotation({ enabled: true });
-  motion.sample(3500);
-  assert.equal(motion.sample(5300).spinning, true);
-  motion.interact(5400);
-  assert.equal(motion.sample(8899).spinning, false);
-  motion.setEnabled(false, 9000);
+  motion.sample(0);
+  assert.equal(motion.sample(450).spinning, true);
+  motion.interact(500);
+  assert.equal(motion.sample(500).speed, 0);
+  assert.equal(motion.sample(950).speed, 2.4);
+  motion.setEnabled(false, 1000);
   assert.equal(motion.sample(999999).spinning, false);
   motion.setEnabled(true, 1000000, true);
   motion.sample(1000000);
-  assert.equal(motion.sample(1001800).speed, 0.42);
+  assert.equal(motion.sample(1000450).speed, 2.4);
 });
 
 test("modal, hidden-tab, and offscreen pauses resume only after every blocker clears", () => {
@@ -51,9 +51,9 @@ test("modal, hidden-tab, and offscreen pauses resume only after every blocker cl
   motion.block("hidden-tab", false, 4000);
   assert.equal(motion.sample(20000).spinning, false);
   motion.block("offscreen", false, 21000);
-  assert.equal(motion.sample(24499).spinning, false);
-  motion.sample(24500);
-  assert.equal(motion.sample(26300).speed, 0.42);
+  assert.equal(motion.sample(21000).speed, 0);
+  motion.sample(21000);
+  assert.equal(motion.sample(21450).speed, 2.4);
 });
 
 test("clearing a lost pointer preserves other pauses and defaults stay still", () => {
@@ -65,5 +65,7 @@ test("clearing a lost pointer preserves other pauses and defaults stay still", (
   motion.clearHolds(2100);
   assert.equal(motion.sample(99999).spinning, false);
   motion.block("hidden-tab", false, 100000);
-  assert.equal(motion.sample(103499).spinning, false);
+  assert.equal(motion.sample(100000).speed, 0);
+  motion.sample(100000);
+  assert.equal(motion.sample(100450).speed, 2.4);
 });
