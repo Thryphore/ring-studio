@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 
 export default defineConfig(({ mode }) => ({
+  // Relative base so the built app works on GitHub project Pages
+  // (e.g. /ring-studio/) as well as locally and in the standalone file.
+  base: "./",
   optimizeDeps: { noDiscovery: true, exclude: ["three", "lucide"] },
   build: {
     outDir: mode === "standalone" ? "dist-standalone" : "dist",

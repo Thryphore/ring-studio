@@ -9,8 +9,9 @@ const style = html.match(
 );
 if (!script || !style)
   throw new Error("The standalone build is missing its script or stylesheet.");
-const js = await readFile(resolve(root, script[1].replace(/^\//, "")), "utf8");
-const css = await readFile(resolve(root, style[1].replace(/^\//, "")), "utf8");
+const assetPath = (href) => href.replace(/^\.\//, "").replace(/^\//, "");
+const js = await readFile(resolve(root, assetPath(script[1])), "utf8");
+const css = await readFile(resolve(root, assetPath(style[1])), "utf8");
 html = html.replace(
   script[0],
   () =>
