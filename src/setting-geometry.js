@@ -42,6 +42,10 @@ export function outlineLength(points) {
 }
 
 export function settingSpecs(state, bandTop) {
+  // The open V head leaves room beneath the culet for its arms to converge
+  // directly into the shank. Gallery heads keep their existing lower seating.
+  const culetClearance =
+    state.stoneCount === 1 && state.basket === "None" ? 0.16 : 0.045;
   const bandSurface = (x) =>
     Math.max(
       bandTop - 0.32,
@@ -56,13 +60,14 @@ export function settingSpecs(state, bandTop) {
     // Seat the pavilion over the local curve of the shank. Using the top of
     // the entire band for every stone creates the tall, disconnected posts.
     const culetX = x + depth * Math.sin(tilt);
-    const y = bandSurface(culetX) + depth * Math.cos(tilt) + 0.045;
+    const y = bandSurface(culetX) + depth * Math.cos(tilt) + culetClearance;
     return {
       shape,
       carat,
       scale,
       depth,
       crown,
+      culetClearance,
       halfWidth,
       halfLength: scale * profile.halfLength,
       tilt,
@@ -124,13 +129,19 @@ export function settingSpecs(state, bandTop) {
   ];
 }
 
-export function prongAngles(shape, style) {
+export function prongAngles(shape, style, { solitaire = false } = {}) {
   if (style === "6 Prong")
     return Array.from({ length: 6 }, (_, i) => Math.PI / 2 + (i * Math.PI) / 3);
   if (style === "4 Compass" || shape === "Marquise")
     return [0, Math.PI / 2, Math.PI, Math.PI * 1.5];
   if (shape === "Pear")
     return [Math.PI / 2, Math.PI * 1.12, Math.PI * 1.5, Math.PI * 1.88];
+  // The round solitaire's paired claws sit nearer the shoulders of the stone.
+  // Diagonal 45-degree posts leave its girdle visibly overhanging the cup.
+  if (solitaire && shape === "Round" && style === "4 Classic") {
+    const a = Math.PI / 6;
+    return [a, Math.PI - a, Math.PI + a, Math.PI * 2 - a];
+  }
   const p = cutProfiles[shape];
   const corner = Math.atan2(p.halfLength, p.halfWidth);
   return [corner, Math.PI - corner, Math.PI + corner, Math.PI * 2 - corner];

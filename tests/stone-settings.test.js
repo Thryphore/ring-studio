@@ -9,7 +9,67 @@ import {
   stoneScale,
   stoneDimensions,
 } from "../src/gem-proportions.js";
-import { bezelGeometry, shoulderGeometry } from "../src/setting-geometry.js";
+import {
+  bezelGeometry,
+  shoulderGeometry,
+  prongAngles,
+} from "../src/setting-geometry.js";
+
+test("Open solitaire prong roots are covered by the band while the pavilion stays clear", () => {
+  const p = new THREE.Vector3();
+  for (const shape of shapes)
+    for (const carat of [0.5, 5])
+      for (const prongCount of ["4 Classic", "4 Compass", "6 Prong"]) {
+        const ring = buildRing({ ...defaults, shape, carat, prongCount });
+        ring.updateMatrixWorld(true);
+        const band = ring.children[0];
+        band.geometry.computeBoundingBox();
+        const bandTop = band.geometry.boundingBox.max.y;
+        const shankVolume = new THREE.Mesh(
+          band.geometry,
+          new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }),
+        );
+        shankVolume.matrixWorld.copy(band.matrixWorld);
+        const head = ring.children.find((o) => o.userData.isSetting);
+        const stone = head.children.find((o) => o.userData.isCenterStone);
+        const diamondBounds = new THREE.Box3().setFromObject(stone, true);
+        assert.ok(
+          diamondBounds.min.y > bandTop + 0.12,
+          `${shape}: culet clearance`,
+        );
+        assert.ok(
+          !ring.children.some((o) => o.userData.isMount),
+          "No separate pedestal",
+        );
+        const arms = head.children.filter((o) => o.userData.isSolitaireProng);
+        assert.equal(arms.length, prongAngles(shape, prongCount).length);
+        for (const arm of arms) {
+          const vertices = arm.geometry.attributes.position;
+          // These arms have uncapped roots. Every point on their starting
+          // section must be inside the actual shank, including its rounded
+          // sides. Band width alone is not a limit on the V's sideways flare.
+          for (let i = 0; i <= arm.geometry.parameters.radialSegments; i++) {
+            p.fromBufferAttribute(vertices, i).applyMatrix4(arm.matrixWorld);
+            const hits = new THREE.Raycaster(
+              p,
+              new THREE.Vector3(0.17, 0.97, 0.11).normalize(),
+            )
+              .intersectObject(shankVolume)
+              .filter(
+                (hit, j, all) =>
+                  j === 0 ||
+                  Math.abs(hit.distance - all[j - 1].distance) > 0.00001,
+              );
+            assert.equal(
+              hits.length % 2,
+              1,
+              `${shape}, ${carat}, ${prongCount}: exposed prong root`,
+            );
+          }
+        }
+        shankVolume.material.dispose();
+      }
+});
 
 test("Every cut is closed and its optical planes contain the rendered stone", () => {
   const p = new THREE.Vector3();
