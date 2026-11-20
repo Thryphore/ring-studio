@@ -2,7 +2,7 @@
 // OrbitControls supplies the turntable movement; no independent timers run.
 export class IdleRotation {
   constructor(
-    { enabled = false, delay = 0, ramp = 450, speed = 2.4 } = {},
+    { enabled = false, delay = 0, ramp = 450, speed = 4.8 } = {},
     now = 0,
   ) {
     this.enabled = enabled;
