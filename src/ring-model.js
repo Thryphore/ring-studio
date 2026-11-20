@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { createDiamondCut, diamondOutline } from "./diamond.js";
 import { metalColors } from "./config.js";
 import { createDiamondGlints } from "./diamond-glints.js";
+import { createMetalMaterial } from "./metal-finish.js";
 import {
   MM_TO_WORLD,
   BAND_OUTER,
@@ -23,8 +24,8 @@ import {
 // Interface swatches remain independent of their 3D finish.
 const polishedMetalColors = {
   ...metalColors,
-  "14k Yellow": "#f0c562",
-  "18k Yellow": "#f3bc3f",
+  "14k Yellow": "#ffd06a",
+  "18k Yellow": "#ffc349",
   "14k Rose": "#edc7b5",
   "18k Rose": "#ecc1ab",
   "14k White": "#e6e7e5",
@@ -192,21 +193,11 @@ export function buildRing(s) {
   const headFinish = s.metal === "Mixed" ? s.headMetal : s.metal;
   const bandColor = polishedMetalColors[bandFinish];
   const headColor = polishedMetalColors[headFinish];
-  const material = (color, finish) => {
-    const polishedGold = /Yellow|Rose/.test(finish);
-    return new THREE.MeshPhysicalMaterial({
-      color,
-      metalness: 1,
-      roughness: polishedGold ? 0.032 : 0.06,
-      envMapIntensity: polishedGold ? 1.38 : 1.12,
-      // Bare polished metal reflects its own color; a dielectric clear coat
-      // adds a white gloss that makes gold look painted or overexposed.
-      clearcoat: 0,
-    });
-  };
-  const bandMetal = material(bandColor, bandFinish),
+  const bandMetal = createMetalMaterial(bandColor, bandFinish),
     headMetal =
-      s.metal === "Mixed" ? material(headColor, headFinish) : bandMetal;
+      s.metal === "Mixed"
+        ? createMetalMaterial(headColor, headFinish)
+        : bandMetal;
   const radius = ringRadius(s.size, s.fit);
   const bandTop = radius - 0.25 + BAND_OUTER;
   const mesh = (geometry, mat = headMetal, parent = ring) => {
@@ -275,25 +266,35 @@ export function buildRing(s) {
     for (const point of points) point.y = y;
     return tube(points, thickness, headMetal, group, true);
   };
-  const taperedArm = (curve, rootRadius, tipRadius, group) => {
+  const taperedArm = (curve, bodyRadius, tipRadius, group) => {
     const segments = 64,
       sides = 24;
-    const geometry = new THREE.TubeGeometry(curve, segments, rootRadius, sides);
+    const geometry = new THREE.TubeGeometry(curve, segments, bodyRadius, sides);
     const positions = geometry.getAttribute("position");
     const point = new THREE.Vector3();
     for (let i = 0; i <= segments; i++) {
       const center = curve.getPointAt(i / segments);
-      const radiusAt = THREE.MathUtils.lerp(
-        rootRadius,
-        tipRadius,
-        (i / segments) ** 0.7,
-      );
+      const u = i / segments;
+      // The arms merge into a narrow common seat, open into a fuller body,
+      // then taper into the claw. Full-width root caps look like solder beads.
+      const radiusAt =
+        u < 0.24
+          ? THREE.MathUtils.lerp(
+              bodyRadius * 0.62,
+              bodyRadius,
+              THREE.MathUtils.smoothstep(u, 0, 0.24),
+            )
+          : THREE.MathUtils.lerp(
+              bodyRadius,
+              tipRadius,
+              THREE.MathUtils.smoothstep(u, 0.24, 1),
+            );
       for (let j = 0; j <= sides; j++) {
         const index = i * (sides + 1) + j;
         point
           .fromBufferAttribute(positions, index)
           .sub(center)
-          .multiplyScalar(radiusAt / rootRadius)
+          .multiplyScalar(radiusAt / bodyRadius)
           .add(center);
         positions.setXYZ(index, point.x, point.y, point.z);
       }
@@ -311,7 +312,7 @@ export function buildRing(s) {
       normals.setXYZ(b, point.x, point.y, point.z);
     }
     mesh(geometry, headMetal, group);
-    roundCap(curve.getPointAt(0), rootRadius, headMetal, group);
+    roundCap(curve.getPointAt(0), bodyRadius * 0.62, headMetal, group);
   };
   const melee = (spec, group, hidden = false) => {
     const tiny = hidden ? 0.047 : 0.061;
@@ -447,12 +448,20 @@ export function buildRing(s) {
         const x = ox * spec.scale,
           z = oz * spec.scale;
         const petite = s.prongTips === "Petite Claw";
-        const tipY = spec.scale * 0.033 + 0.012;
+        // Keep small side-stone claws delicate while giving the main setting
+        // the fuller, softly tapered metal of a cast and polished prong.
+        const prongScale = THREE.MathUtils.clamp(
+          Math.sqrt(spec.scale / 0.53),
+          0.65,
+          1.3,
+        );
+        const tipY = spec.scale * 0.055 + 0.012;
         const curve = new THREE.CatmullRomCurve3(
           [
             V(x * 0.2, rootY, z * 0.2),
-            V(x * 0.72, -spec.depth * 0.45, z * 0.72),
-            V(x * 0.99, -0.025, z * 0.99),
+            V(x * 0.52, -spec.depth * 0.64, z * 0.52),
+            V(x * 0.89, -spec.depth * 0.23, z * 0.89),
+            V(x * 1.02, -0.006, z * 1.02),
             V(x * 0.99, tipY, z * 0.99),
           ],
           false,
@@ -460,8 +469,8 @@ export function buildRing(s) {
         );
         taperedArm(
           curve,
-          petite ? 0.028 : 0.036,
-          petite ? 0.015 : 0.021,
+          (petite ? 0.037 : 0.052) * prongScale,
+          (petite ? 0.021 : 0.029) * prongScale,
           group,
         );
         let tip;
@@ -479,6 +488,7 @@ export function buildRing(s) {
           tip = mesh(clawGeometry(petite), headMetal, group);
           tip.quaternion.setFromUnitVectors(V(0, 0, 1), V(x, 0, z).normalize());
         }
+        tip.scale.multiplyScalar(prongScale);
         tip.position.set(x * 0.975, tipY, z * 0.975);
         if (s.prongPave === "Pavé")
           for (const t of [0.38, 0.57, 0.76]) {

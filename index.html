@@ -132,6 +132,37 @@
                   <i data-lucide="scan"></i>
                 </button>
               </div>
+              <div
+                class="lighting-tuner"
+                aria-label="Temporary lighting controls"
+              >
+                <label for="light-level"
+                  >Light level <small>Temporary</small></label
+                >
+                <output id="light-level-value" for="light-level">1.90</output>
+                <button
+                  type="button"
+                  class="icon-btn"
+                  id="reset-light"
+                  aria-label="Reset light level to 1.90"
+                  title="Reset light level to 1.90"
+                >
+                  <i data-lucide="rotate-ccw"></i>
+                </button>
+                <input
+                  id="light-level"
+                  type="range"
+                  min="0.2"
+                  max="3"
+                  step="0.05"
+                  value="1.9"
+                  aria-describedby="light-level-note"
+                />
+                <span id="light-level-note" class="sr-only"
+                  >Current default is 1.90. Share the displayed number when you
+                  find the light you prefer.</span
+                >
+              </div>
               <span class="drag-hint"
                 ><i data-lucide="mouse-pointer-2"></i
                 ><span>Drag to rotate · Scroll to zoom</span></span

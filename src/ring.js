@@ -12,6 +12,8 @@ const views = {
   detail: [4.5, 3.4, 7.0],
 };
 
+export const DEFAULT_LIGHT_LEVEL = 1.9;
+
 export class RingViewer {
   constructor(container, { idleRotate = false } = {}) {
     this.container = container;
@@ -34,7 +36,7 @@ export class RingViewer {
     this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = DEFAULT_LIGHT_LEVEL;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.domElement.setAttribute("aria-hidden", "true");
     container.appendChild(this.renderer.domElement);
@@ -68,7 +70,7 @@ export class RingViewer {
     this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
 
-    const key = new THREE.DirectionalLight("#fff4e7", 1.1);
+    const key = new THREE.DirectionalLight("#fff4e7", 1.3);
     key.position.set(-3.5, 8.0, 4.5);
     key.castShadow = true;
     key.shadow.mapSize.set(1024, 1024);
@@ -86,13 +88,13 @@ export class RingViewer {
     key.shadow.normalBias = 0.012;
     this.scene.add(key);
     this.keyLight = key;
-    const fill = new THREE.DirectionalLight("#f1f5ff", 0.35);
+    const fill = new THREE.DirectionalLight("#f1f5ff", 0.6);
     fill.position.set(4.0, 1.4, 2.0);
     this.scene.add(fill);
-    const rim = new THREE.DirectionalLight("#e3edff", 0.7);
+    const rim = new THREE.DirectionalLight("#e3edff", 0.8);
     rim.position.set(2.5, 3.0, -4.0);
     this.scene.add(rim);
-    this.scene.add(new THREE.HemisphereLight("#f8faff", "#b7a78a", 0.16));
+    this.scene.add(new THREE.HemisphereLight("#f8faff", "#b7a78a", 0.22));
 
     this.ring = new THREE.Group();
     // Align the ring with the vertical turntable axis; only the starting yaw
@@ -461,6 +463,11 @@ export class RingViewer {
     this.backdrop = mode;
     const stage = this.container.closest(".ring-stage");
     if (stage) stage.style.backgroundImage = `url("${backdropImage(mode)}")`;
+  }
+  setLightLevel(level) {
+    this.renderer.toneMappingExposure = level;
+    this.pauseForInteraction();
+    this.dirty = true;
   }
   setZoom(delta) {
     this.pauseForInteraction();

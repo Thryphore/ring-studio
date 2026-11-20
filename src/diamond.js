@@ -197,7 +197,7 @@ const fragmentShader = /* glsl */ `
     vec3 origin = vPosition + ray * 0.0006;
     vec3 throughput = vec3(1.0 - reflection);
 
-    for (int bounce = 0; bounce < 6; bounce++) {
+    for (int bounce = 0; bounce < 8; bounce++) {
       vec3 hit, outwardNormal;
       float distance;
       if (!nextFacet(origin, ray, hit, outwardNormal, distance)) break;
@@ -216,7 +216,9 @@ const fragmentShader = /* glsl */ `
       origin = hit + ray * 0.0006;
       if (max(max(throughput.r, throughput.g), throughput.b) < 0.012) break;
     }
-    result += throughput * studio(ray) * 0.85;
+    // Residual rays are still inside the stone. Sampling the studio here
+    // leaks light through totally reflecting facets and washes out the cut.
+    // Only rays that actually cross a diamond-to-air interface collect light.
     return result;
   }
 

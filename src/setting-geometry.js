@@ -209,8 +209,8 @@ export function clawGeometry(petite = false) {
     const angle = (i / 20) * Math.PI,
       u = (Math.cos(angle) + 1) / 2;
     return new THREE.Vector2(
-      Math.sin(angle) * (0.45 + 0.55 * u) * 0.029 * factor,
-      Math.cos(angle) * 0.052 * factor,
+      Math.sin(angle) * (0.45 + 0.55 * u) * 0.038 * factor,
+      Math.cos(angle) * 0.061 * factor,
     );
   });
   return new THREE.LatheGeometry(points.reverse(), 32)

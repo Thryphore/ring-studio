@@ -31,7 +31,7 @@ import {
   SlidersHorizontal,
   SquarePen,
 } from "lucide";
-import { RingViewer } from "./ring.js";
+import { RingViewer, DEFAULT_LIGHT_LEVEL } from "./ring.js";
 import { createWelcome } from "./welcome.js";
 import { createInspector } from "./inspector.js";
 import { stoneDimensions } from "./gem-proportions.js";
@@ -228,6 +228,30 @@ document
     (button) => (button.onclick = () => setBackdrop(button.dataset.backdrop)),
   );
 
+function setLightLevel(value) {
+  const numeric = Number(value);
+  const level = Number.isFinite(numeric)
+    ? Number(clamp(numeric, 0.2, 3, 0.05).toFixed(2))
+    : DEFAULT_LIGHT_LEVEL;
+  const slider = $("light-level");
+  slider.value = level;
+  slider.style.setProperty("--progress", `${((level - 0.2) / 2.8) * 100}%`);
+  slider.setAttribute("aria-valuetext", `Light level ${level.toFixed(2)}`);
+  $("light-level-value").value = level.toFixed(2);
+  viewer?.setLightLevel(level);
+  try {
+    sessionStorage.setItem("aurelle-light-level", String(level));
+    sessionStorage.setItem(
+      "aurelle-light-default",
+      String(DEFAULT_LIGHT_LEVEL),
+    );
+  } catch {}
+}
+$("light-level").addEventListener("input", (event) =>
+  setLightLevel(event.target.value),
+);
+$("reset-light").onclick = () => setLightLevel(DEFAULT_LIGHT_LEVEL);
+
 function startViewer() {
   if (viewer) {
     viewer.resize();
@@ -256,6 +280,20 @@ function startViewer() {
     mode = sessionStorage.getItem("aurelle-backdrop") || mode;
   } catch {}
   setBackdrop(mode);
+  let lightLevel = DEFAULT_LIGHT_LEVEL;
+  try {
+    const savedLight = sessionStorage.getItem("aurelle-light-level");
+    const savedDefault = Number(
+      sessionStorage.getItem("aurelle-light-default"),
+    );
+    if (
+      savedDefault === DEFAULT_LIGHT_LEVEL &&
+      savedLight !== null &&
+      savedLight.trim() !== ""
+    )
+      lightLevel = savedLight;
+  } catch {}
+  setLightLevel(lightLevel);
 }
 function enterStudio(next) {
   state = sanitize(next);

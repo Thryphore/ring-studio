@@ -26,13 +26,17 @@ export const studioRadianceGLSL = /* glsl */ `
   vec3 studioRadiance(vec3 direction) {
     vec3 d = normalize(direction);
     float ceiling = smoothstep(-0.65, 0.90, d.y);
-    vec3 light = mix(vec3(0.28, 0.30, 0.33), vec3(0.62, 0.66, 0.70), ceiling);
     #ifdef METAL_STUDIO
-      light *= 0.86;
+      vec3 light = mix(vec3(0.17, 0.18, 0.20), vec3(0.58, 0.62, 0.67), ceiling) * 0.86;
+    #else
+      // A diamond needs unlit space between the studio panels. An evenly
+      // luminous room returns pale gray from every pavilion facet, obscuring
+      // both its cut and the brief flashes as it turns through the lights.
+      vec3 light = mix(vec3(0.16, 0.175, 0.20), vec3(0.52, 0.55, 0.59), ceiling);
     #endif
     // The main softbox is high and to the left, with a quieter right fill.
     light += vec3(2.3, 2.20, 1.95) * graduatedPanel(d, vec3(-3.5, 8.0, 4.5), vec2(0.30, 0.52), 0.05);
-    light += vec3(1.2, 1.25, 1.3) * graduatedPanel(d, vec3(4.0, 1.4, 2.0), vec2(0.22, 0.68), 0.04);
+    light += vec3(1.45, 1.50, 1.55) * graduatedPanel(d, vec3(4.0, 1.4, 2.0), vec2(0.22, 0.68), 0.04);
     light += vec3(2.0, 1.85, 1.55) * lightPanel(d, vec3(-1.0, 1.5, 4.0), vec2(0.025, 0.55), 0.014);
     light += vec3(1.4, 1.32, 1.16) * graduatedPanel(d, vec3(-2.5, -2.0, 4.5), vec2(0.30, 0.38), 0.08);
     light += vec3(3.8, 3.85, 4.0) * lightPanel(d, vec3(2.5, 3.0, -4.0), vec2(0.035, 0.58), 0.018);
@@ -50,6 +54,11 @@ export const studioRadianceGLSL = /* glsl */ `
     float shadowWeight = 1.0 - smoothstep(0.0, 0.85, luminance);
     light *= 1.0 - 0.32 * shadowWeight;
     #ifdef METAL_STUDIO
+      // Broad silk panels illuminate the inside and underside of the shank.
+      // Their falloff supplies curved gradients between the narrow strips,
+      // instead of a large, uniformly gold reflection of an empty floor.
+      light += vec3(0.75, 0.72, 0.65) * graduatedPanel(d, vec3(0.4, -4.0, 1.1), vec2(0.75, 0.48), 0.20);
+      light += vec3(0.80, 0.76, 0.68) * graduatedPanel(d, vec3(-5.0, 1.0, 2.0), vec2(0.38, 0.90), 0.22);
       // Alternating dark cards and bright silk strips give a polished surface
       // recognizable reflected shapes instead of an evenly lit gold fill.
       float frontFlag = lightPanel(d, vec3(3.2, 0.4, 4.0), vec2(0.065, 0.72), 0.015);
