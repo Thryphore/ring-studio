@@ -4,6 +4,7 @@ import { createStudioEnvironment } from "./studio-lighting.js";
 import { buildRing } from "./ring-model.js";
 import { backdropImage, paintBackdrop } from "./preview-background.js";
 import { IdleRotation } from "./idle-rotation.js";
+import { JewelryPostFX } from "./post-fx.js";
 
 const views = {
   signature: [4.6, 3.1, 7.6],
@@ -15,9 +16,10 @@ const views = {
 export const DEFAULT_LIGHT_LEVEL = 1.9;
 
 export class RingViewer {
-  constructor(container, { idleRotate = false } = {}) {
+  constructor(container, { idleRotate = false, postFX = idleRotate } = {}) {
     this.container = container;
     this.zoom = 100;
+    this.backdrop = "studio";
     this.currentView = "signature";
     this.motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
     this.reducedMotion = this.motionPreference.matches;
@@ -61,11 +63,18 @@ export class RingViewer {
       );
       this.onZoom?.(this.zoom);
     });
-    this.environmentTarget = createStudioEnvironment(this.renderer, {
-      resolution: container.clientWidth >= 640 ? 1024 : 512,
-    });
+    this.envResolution = container.clientWidth >= 640 ? 1024 : 512;
+    this.environments = {
+      studio: createStudioEnvironment(this.renderer, {
+        resolution: this.envResolution,
+        noir: false,
+      }),
+      noir: null,
+    };
+    this.environmentTarget = this.environments.studio;
     this.environment = this.environmentTarget.texture;
     this.scene.environment = this.environment;
+    this.postFX = postFX ? new JewelryPostFX(this.renderer) : null;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.VSMShadowMap;
     this.renderer.shadowMap.autoUpdate = false;
@@ -94,7 +103,8 @@ export class RingViewer {
     const rim = new THREE.DirectionalLight("#e3edff", 0.8);
     rim.position.set(2.5, 3.0, -4.0);
     this.scene.add(rim);
-    this.scene.add(new THREE.HemisphereLight("#f8faff", "#b7a78a", 0.22));
+    this.hemiLight = new THREE.HemisphereLight("#f8faff", "#b7a78a", 0.22);
+    this.scene.add(this.hemiLight);
 
     this.ring = new THREE.Group();
     // Align the ring with the vertical turntable axis; only the starting yaw
@@ -121,7 +131,7 @@ export class RingViewer {
       this.reportRotation(motion);
       this.controls.update(elapsed);
       if (this.dirty || this.controls.autoRotate) {
-        this.renderer.render(this.scene, this.camera);
+        this.renderScene();
         this.dirty = false;
       }
     });
@@ -134,6 +144,32 @@ export class RingViewer {
       },
       { signal: this.events.signal },
     );
+  }
+  syncShaderState() {
+    const noir = this.backdrop === "noir" ? 1.0 : 0.0;
+    const hdrGain = this.postFX?.supported ? 2.2 : 1.0;
+    this.ring.traverse((obj) => {
+      const uniforms = obj.material?.uniforms;
+      if (!uniforms) return;
+      if (uniforms.uNoir) uniforms.uNoir.value = noir;
+      if (uniforms.uHdrGain) uniforms.uHdrGain.value = hdrGain;
+    });
+  }
+  renderScene() {
+    this.syncShaderState();
+    if (this.postFX?.supported) {
+      const canvas = this.renderer.domElement;
+      this.postFX.setSize(canvas.width, canvas.height);
+      const cameraDistance = this.camera.position.distanceTo(
+        this.controls.target,
+      );
+      this.postFX.render(this.scene, this.camera, {
+        noir: this.backdrop === "noir",
+        cameraDistance,
+      });
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
   get rotationEnabled() {
     return this.idleRotation.enabled;
@@ -364,7 +400,7 @@ export class RingViewer {
       this.frameView(this.currentView, Boolean(previousSize));
     this.renderer.shadowMap.needsUpdate = true;
     this.dirty = true;
-    this.renderer.render(this.scene, this.camera);
+    this.renderScene();
   }
   dispose() {
     this.renderer.setAnimationLoop(null);
@@ -373,7 +409,9 @@ export class RingViewer {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.clearModel();
-    this.environmentTarget.dispose();
+    this.postFX?.dispose();
+    this.environments.studio?.dispose();
+    this.environments.noir?.dispose();
     this.keyLight.shadow.dispose();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
@@ -460,9 +498,21 @@ export class RingViewer {
     this.frameView(this.currentView);
   }
   setBackdrop(mode) {
-    this.backdrop = mode;
+    const key = mode === "noir" ? "noir" : "studio";
+    this.backdrop = key;
+    if (key === "noir" && !this.environments.noir) {
+      this.environments.noir = createStudioEnvironment(this.renderer, {
+        resolution: this.envResolution,
+        noir: true,
+      });
+    }
+    this.environmentTarget = this.environments[key];
+    this.environment = this.environmentTarget.texture;
+    this.scene.environment = this.environment;
+    if (this.hemiLight) this.hemiLight.intensity = key === "noir" ? 0.08 : 0.22;
     const stage = this.container.closest(".ring-stage");
-    if (stage) stage.style.backgroundImage = `url("${backdropImage(mode)}")`;
+    if (stage) stage.style.backgroundImage = `url("${backdropImage(key)}")`;
+    this.dirty = true;
   }
   setLightLevel(level) {
     this.renderer.toneMappingExposure = level;
@@ -495,7 +545,7 @@ export class RingViewer {
     );
     try {
       this.renderer.setPixelRatio(exportRatio);
-      this.renderer.render(this.scene, this.camera);
+      this.renderScene();
       const canvas = document.createElement("canvas");
       canvas.width = this.renderer.domElement.width;
       canvas.height = this.renderer.domElement.height;
@@ -512,7 +562,7 @@ export class RingViewer {
       return canvas.toDataURL("image/png");
     } finally {
       this.renderer.setPixelRatio(ratio);
-      this.renderer.render(this.scene, this.camera);
+      this.renderScene();
     }
   }
   thumbnail() {

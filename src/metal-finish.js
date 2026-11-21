@@ -24,21 +24,25 @@ const frostNoise = /* glsl */ `
 export function createMetalMaterial(color, finish) {
   const yellow = /Yellow/.test(finish);
   const rose = /Rose/.test(finish);
-  // Calibrate the reflected alloy color in linear space. The previous very
-  // low blue reflectance made yellow gold read as brass under the bright
-  // studio. A warmer, less saturated response leaves creamy highlights over
-  // amber midtones without changing the diamond's existing mount tint.
-  const goldReflectance = {
+  const platinum = finish === "Platinum";
+  // Calibrate reflected alloy colors in linear space so every precious metal
+  // reads authentically under the 1.90 studio exposure without washing out.
+  const alloyReflectance = {
     "14k Yellow": [1.0, 0.63, 0.24],
     "18k Yellow": [1.0, 0.56, 0.17],
+    "14k Rose": [1.0, 0.54, 0.39],
+    "18k Rose": [1.0, 0.60, 0.45],
+    "14k White": [0.90, 0.89, 0.86],
+    "18k White": [0.88, 0.88, 0.87],
+    Platinum: [0.80, 0.82, 0.85],
   }[finish];
   const material = new THREE.MeshPhysicalMaterial({
-    color: goldReflectance
-      ? new THREE.Color().setRGB(...goldReflectance)
+    color: alloyReflectance
+      ? new THREE.Color().setRGB(...alloyReflectance)
       : color,
     metalness: 1,
-    roughness: yellow ? 0.068 : rose ? 0.088 : 0.095,
-    envMapIntensity: yellow ? 1.1 : rose ? 1.38 : 1.12,
+    roughness: yellow ? 0.068 : platinum ? 0.075 : rose ? 0.078 : 0.088,
+    envMapIntensity: yellow ? 1.1 : rose ? 1.18 : platinum ? 1.15 : 1.12,
     clearcoat: 0,
   });
   material.onBeforeCompile = (shader) => {

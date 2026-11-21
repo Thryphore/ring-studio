@@ -139,6 +139,8 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   uniform vec4 uPlanes[PLANE_COUNT];
   uniform vec3 uMetalTint;
+  uniform float uNoir;
+  uniform float uBezelEnclosure;
   varying vec3 vPosition;
   varying vec3 vNormal;
   varying vec3 vCamera;
@@ -154,9 +156,11 @@ const fragmentShader = /* glsl */ `
 
   vec3 studio(vec3 localDirection) {
     vec3 d = toWorld(localDirection);
-    vec3 light = studioRadiance(d);
-    float mountReflection = (1.0 - smoothstep(-0.85, -0.15, d.y)) * 0.06;
-    return mix(light, uMetalTint * 0.8, mountReflection);
+    vec3 light = studioRadiance(d, uNoir);
+    float mountReflection = (1.0 - smoothstep(-0.85, -0.15, d.y)) * 0.08;
+    float bezelWall = (1.0 - smoothstep(-0.20, 0.16, d.y)) * uBezelEnclosure;
+    vec3 wallTint = uMetalTint * mix(0.80, 0.48, bezelWall);
+    return mix(light, wallTint, clamp(mountReflection + bezelWall, 0.0, 0.55));
   }
 
   float fresnel(float cosine, float incidentIor, float transmittedIor) {
@@ -190,21 +194,20 @@ const fragmentShader = /* glsl */ `
     return distance < 9999.0;
   }
 
-  vec3 traceDiamond(vec3 incoming, vec3 surfaceNormal, float ior) {
-    float reflection = fresnel(dot(-incoming, surfaceNormal), 1.0, ior);
-    vec3 result = studio(reflect(incoming, surfaceNormal)) * reflection;
+  vec3 traceInternal(vec3 incoming, vec3 surfaceNormal, float ior, float transmitted) {
     vec3 ray = refract(incoming, surfaceNormal, 1.0 / ior);
     vec3 origin = vPosition + ray * 0.0006;
-    vec3 throughput = vec3(1.0 - reflection);
+    vec3 throughput = vec3(transmitted);
+    vec3 result = vec3(0.0);
 
-    for (int bounce = 0; bounce < 8; bounce++) {
+    for (int bounce = 0; bounce < 7; bounce++) {
       vec3 hit, outwardNormal;
       float distance;
       if (!nextFacet(origin, ray, hit, outwardNormal, distance)) break;
       throughput *= exp(-vec3(0.012, 0.005, 0.002) * distance);
       vec3 exitRay = refract(ray, -outwardNormal, ior);
       if (dot(exitRay, exitRay) > 0.001) {
-        // Glass-to-air reflections rise rapidly near the critical angle.
+        // Diamond-to-air reflections rise rapidly near the critical angle.
         // Evaluate that interface explicitly to retain bright mirror facets.
         float reflected = fresnel(dot(ray, outwardNormal), ior, 1.0);
         result += throughput * (1.0 - reflected) * studio(exitRay);
@@ -214,30 +217,42 @@ const fragmentShader = /* glsl */ `
       // inside the pavilion rather than returning a painted or black facet.
       ray = reflect(ray, outwardNormal);
       origin = hit + ray * 0.0006;
-      if (max(max(throughput.r, throughput.g), throughput.b) < 0.012) break;
+      if (max(max(throughput.r, throughput.g), throughput.b) < 0.015) break;
     }
-    // Residual rays are still inside the stone. Sampling the studio here
-    // leaks light through totally reflecting facets and washes out the cut.
-    // Only rays that actually cross a diamond-to-air interface collect light.
+    // Residual rays are still inside the stone. Only rays that actually
+    // cross a diamond-to-air interface collect light.
     return result;
   }
 
   void main() {
     vec3 normal = normalize(vNormal);
     vec3 incoming = normalize(vPosition - vCamera);
-    // Trace wavelengths separately: the diamond's high refractive index splits
-    // crisp reflections into restrained red/blue fire at facet boundaries.
-    vec3 red = traceDiamond(incoming, normal, 2.397);
-    vec3 green = traceDiamond(incoming, normal, 2.417);
-    vec3 blue = traceDiamond(incoming, normal, 2.447);
-    vec3 radiance = vec3(red.r, green.g, blue.b);
+    float cosIn = dot(-incoming, normal);
+    float outerReflection = fresnel(cosIn, 1.0, 2.418);
+    vec3 surface = studio(reflect(incoming, normal)) * outerReflection;
+    float transmitted = 1.0 - outerReflection;
+
+    // 5-band spectral dispersion splits crisp light boundaries into silky
+    // red-amber-green-cyan-violet fire without harsh 3-channel RGB fringes.
+    vec3 internal =
+      traceInternal(incoming, normal, 2.394, transmitted) * vec3(0.52, 0.03, 0.00) +
+      traceInternal(incoming, normal, 2.406, transmitted) * vec3(0.42, 0.35, 0.00) +
+      traceInternal(incoming, normal, 2.418, transmitted) * vec3(0.02, 0.48, 0.12) +
+      traceInternal(incoming, normal, 2.432, transmitted) * vec3(0.00, 0.14, 0.44) +
+      traceInternal(incoming, normal, 2.448, transmitted) * vec3(0.04, 0.00, 0.44);
+
+    vec3 radiance = surface + internal;
     gl_FragColor = vec4(radiance, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
 `;
 
-export function createDiamondCut(shape, metalColor) {
+export function createDiamondCut(
+  shape,
+  metalColor,
+  { bezel = false, noir = false } = {},
+) {
   const { geometry, planes } = cutGeometry(shape);
   const material = new THREE.ShaderMaterial({
     name: `Diamond ${shape} — internal refraction`,
@@ -245,6 +260,8 @@ export function createDiamondCut(shape, metalColor) {
     uniforms: {
       uPlanes: { value: planes },
       uMetalTint: { value: new THREE.Color(metalColor) },
+      uNoir: { value: noir ? 1.0 : 0.0 },
+      uBezelEnclosure: { value: bezel ? 0.38 : 0.0 },
     },
     vertexShader,
     fragmentShader,

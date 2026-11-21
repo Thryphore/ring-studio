@@ -249,19 +249,28 @@ export function buildRing(s) {
     }
     return item;
   };
-  const gem = (shape, scale, position, parent = ring, direction) => {
-    if (!cuts.has(shape)) {
-      const cut = createDiamondCut(shape, headColor);
+  const gem = (
+    shape,
+    scale,
+    position,
+    parent = ring,
+    direction,
+    { bezel = false } = {},
+  ) => {
+    const key = `${shape}:${bezel ? "b" : "o"}`;
+    if (!cuts.has(key)) {
+      const cut = createDiamondCut(shape, headColor, { bezel });
       cut.glints = createDiamondGlints(cut.geometry);
-      cuts.set(shape, cut);
+      cuts.set(key, cut);
     }
-    const cut = cuts.get(shape),
+    const cut = cuts.get(key),
       stone = mesh(cut.geometry, cut.material, parent);
     stone.scale.setScalar(scale);
     stone.position.copy(position);
     stone.userData.isGem = true;
     const sparkle = new THREE.Points(cut.glints.geometry, cut.glints.material);
     sparkle.renderOrder = 2;
+    sparkle.userData.isGlint = true;
     sparkle.onBeforeRender = (renderer) => {
       cut.glints.material.uniforms.uViewportHeight.value =
         renderer.domElement.height;
@@ -328,6 +337,8 @@ export function buildRing(s) {
     const arm = mesh(geometry, headMetal, group);
     arm.userData.isProng = true;
     arm.userData.isSolitaireProng = openSolitaire;
+    // Cap the upper end smoothly inside the tip so no flat rim or bump shows.
+    roundCap(curve.getPointAt(1), tipRadius * 0.92, headMetal, group);
     // Solitaire roots begin inside the shank and share a single V-shaped
     // foot. Exposed root caps would add a bead at that otherwise smooth join.
     if (!openSolitaire)
@@ -403,7 +414,9 @@ export function buildRing(s) {
     group.position.copy(spec.position);
     group.rotation.z = spec.tilt;
     ring.add(group);
-    const centerStone = gem(spec.shape, spec.scale, V(0, 0), group);
+    const centerStone = gem(spec.shape, spec.scale, V(0, 0), group, undefined, {
+      bezel: s.basket === "Bezel",
+    });
     centerStone.userData.carat = spec.carat;
     centerStone.userData.isCenterStone = true;
     const rootY = openSolitaire
@@ -494,39 +507,57 @@ export function buildRing(s) {
           ? spec.crown * 0.58 + 0.008
           : spec.scale * 0.055 + 0.012;
         let curve;
+        const radial = V(x, 0, z).normalize();
         if (openSolitaire) {
-          const foot = V(x, 0, z)
-            .normalize()
-            .multiplyScalar(0.02 * prongScale);
+          const foot = radial.clone().multiplyScalar(0.02 * prongScale);
           foot.y = rootY;
           // One continuous cubic gives the cast cup a full lower body and a
           // smoothly rolled upper lip, with no kink at the diamond's girdle.
           curve = new THREE.CubicBezierCurve3(
             foot,
-            V(x * 0.26, rootY * 0.7, z * 0.26),
-            V(x * 1.2, tipY * 0.9, z * 1.2),
-            V(x * 0.89, tipY, z * 0.89),
+            V(x * 0.28, rootY * 0.68, z * 0.28),
+            V(x * 1.14, tipY * 0.85, z * 1.14),
+            V(x * 0.88, tipY, z * 0.88),
           );
           // Fit the arm to the same convex volume used by the optical
           // shader. This prevents an arbitrary V curve disappearing into the
           // pavilion when a cut, carat weight, or prong position changes.
-          const radial = V(x, 0, z).normalize();
-          const planes = cuts.get(spec.shape).material.uniforms.uPlanes.value;
-          const fitted = curve.getPoints(80).map((point) => {
-            if (point.y <= -spec.depth || point.y >= spec.crown) return point;
+          const planes = cuts.get(`${spec.shape}:o`).material.uniforms.uPlanes
+            .value;
+          const rawPoints = curve.getPoints(20);
+          const minRadii = rawPoints.map((point) => {
+            if (point.y <= -spec.depth || point.y >= spec.crown) return 0;
             let boundary = Infinity;
             for (const plane of planes) {
               const facing = plane.x * radial.x + plane.z * radial.z;
               if (facing > 0.000001)
-                boundary = Math.min(boundary,
-                  (-plane.y * point.y / spec.scale - plane.w) / facing);
+                boundary = Math.min(
+                  boundary,
+                  ((-plane.y * point.y) / spec.scale - plane.w) / facing,
+                );
             }
-            const minimum = Math.max(0, boundary) * spec.scale + 0.004;
-            const radius = Math.hypot(point.x, point.z);
-            const delta = radius - minimum;
-            const fittedRadius = 0.5 * (radius + minimum + Math.sqrt(delta * delta + 0.0001));
-            return V(radial.x * fittedRadius, point.y, radial.z * fittedRadius);
+            return Math.max(0, boundary) * spec.scale + 0.008;
           });
+          const radii = rawPoints.map((point, idx) => {
+            const radius = Math.hypot(point.x, point.z);
+            const minimum = minRadii[idx];
+            if (!minimum) return radius;
+            const delta = radius - minimum;
+            return (
+              0.5 * (radius + minimum + Math.sqrt(delta * delta + 0.0012))
+            );
+          });
+          // Smooth the upper profile around the girdle while leaving the root
+          // anchored inside the shank and respecting stone clearance.
+          for (let pass = 0; pass < 6; pass++) {
+            for (let i = 2; i < radii.length - 1; i++) {
+              const avg = (radii[i - 1] + radii[i] * 2 + radii[i + 1]) * 0.25;
+              radii[i] = Math.max(minRadii[i], avg);
+            }
+          }
+          const fitted = rawPoints.map((point, idx) =>
+            V(radial.x * radii[idx], point.y, radial.z * radii[idx]),
+          );
           curve = new THREE.CatmullRomCurve3(fitted, false, "centripetal");
         } else {
           curve = new THREE.CatmullRomCurve3(
@@ -542,6 +573,7 @@ export function buildRing(s) {
           );
         }
         taperedArm(curve, bodyRadius, tipRadius, group);
+        const end = curve.getPointAt(1);
         let tip;
         if (s.prongTips === "Tab") {
           tip = mesh(
@@ -550,22 +582,33 @@ export function buildRing(s) {
             group,
           );
           tip.rotation.y = -a;
+          tip.scale.multiplyScalar(prongScale * (openSolitaire ? 1.15 : 1));
+          tip.position
+            .copy(end)
+            .addScaledVector(radial, -0.014 * prongScale);
         } else if (s.prongTips === "Rounded") {
           tip = mesh(new THREE.SphereGeometry(0.032, 32, 24), headMetal, group);
-          tip.scale.y = 0.8;
+          tip.scale.set(1, 0.82, 1).multiplyScalar(tipRadius / 0.029);
+          tip.position
+            .copy(end)
+            .addScaledVector(radial, -0.008 * prongScale);
         } else {
           tip = mesh(clawGeometry(petite), headMetal, group);
-          tip.quaternion.setFromUnitVectors(
-            V(0, 0, 1),
-            V(x, openSolitaire ? -spec.crown * 0.6 : 0, z).normalize(),
-          );
+          const clawDir = V(
+            x,
+            openSolitaire ? -spec.crown * 0.48 : -spec.crown * 0.16,
+            z,
+          ).normalize();
+          tip.quaternion.setFromUnitVectors(V(0, 0, 1), clawDir);
+          const baseClawRadius = 0.038 * (petite ? 0.72 : 1);
+          const clawScale = (tipRadius / baseClawRadius) * 1.04;
+          // Compensate for clawGeometry's 0.72 flattening so the heel matches
+          // the cylindrical arm tip seamlessly with zero step or bump.
+          tip.scale.set(clawScale, clawScale * 1.35, clawScale * 1.22);
+          tip.position
+            .copy(end)
+            .addScaledVector(clawDir, -0.015 * clawScale);
         }
-        tip.scale.multiplyScalar(prongScale * (openSolitaire ? 1.22 : 1));
-        tip.position.set(
-          x * (openSolitaire ? 0.84 : 0.975),
-          tipY,
-          z * (openSolitaire ? 0.84 : 0.975),
-        );
         if (s.prongPave === "Pavé")
           for (const t of [0.38, 0.57, 0.76]) {
             const point = curve.getPointAt(t);
@@ -700,7 +743,7 @@ export function buildRing(s) {
     const placedPave = [];
     const full = s.paveCoverage === "Full band";
     const tiny = Math.min(0.072, s.width * MM_TO_WORLD * 0.24);
-    const r = radius + BAND_OUTER + 0.009;
+    const r = radius + BAND_OUTER + 0.004;
     const count = Math.floor((Math.PI * 2 * r) / (tiny * 2 + 0.014));
     const step = (Math.PI * 2) / count;
     const halfHead = Math.max(
@@ -711,35 +754,39 @@ export function buildRing(s) {
       Math.asin(Math.min(0.9, (halfHead + 0.03) / r)),
     );
     const angles = Array.from({ length: count }, (_, i) => i * step - Math.PI);
+    const beadGeometry = new THREE.SphereGeometry(0.015, 18, 12);
+    const seatCollar = new THREE.TorusGeometry(tiny * 0.96, 0.011, 10, 22);
+    seatCollar.rotateX(Math.PI / 2);
     for (const a of angles) {
       if (Math.abs(a) < clearAngle || (!full && Math.abs(a) > 1.2)) continue;
-      gem(
-        "Round",
-        tiny,
-        V(Math.sin(a) * r, Math.cos(a) * r - 0.25),
-        ring,
-        V(Math.sin(a), Math.cos(a)),
+      const radialDir = V(Math.sin(a), Math.cos(a));
+      const stonePos = V(Math.sin(a) * r, Math.cos(a) * r - 0.25);
+      gem("Round", tiny, stonePos, ring, radialDir);
+      const collar = mesh(seatCollar, bandMetal);
+      collar.position.set(
+        Math.sin(a) * (r - 0.006),
+        Math.cos(a) * (r - 0.006) - 0.25,
+        0,
       );
-      placedPave.push({
-        point: V(Math.sin(a) * r, Math.cos(a) * r - 0.25),
-        scale: tiny,
-      });
+      collar.quaternion.setFromUnitVectors(up, radialDir);
+      placedPave.push({ point: stonePos, scale: tiny });
       for (const sign of [-1, 1]) {
-        const z = sign * tiny * 0.88;
-        // Short grains rise from the shank to clasp the edge of each melee.
-        // Keeping them near the stone avoids floating beads at the band edge.
-        const rootR = radius + BAND_OUTER - 0.035;
-        const beadR = r + 0.008;
+        const rootZ = sign * tiny * 1.02;
+        const tipZ = sign * tiny * 0.84;
+        // Short grains rise from the shank and angle gently inward to clasp
+        // the edge of each melee stone.
+        const rootR = radius + BAND_OUTER - 0.032;
+        const beadR = r + 0.007;
         tube(
           [
-            V(Math.sin(a) * rootR, Math.cos(a) * rootR - 0.25, z),
-            V(Math.sin(a) * beadR, Math.cos(a) * beadR - 0.25, z),
+            V(Math.sin(a) * rootR, Math.cos(a) * rootR - 0.25, rootZ),
+            V(Math.sin(a) * beadR, Math.cos(a) * beadR - 0.25, tipZ),
           ],
-          0.011,
+          0.01,
           bandMetal,
         );
-        const bead = mesh(new THREE.SphereGeometry(0.016, 20, 14), bandMetal);
-        bead.position.set(Math.sin(a) * beadR, Math.cos(a) * beadR - 0.25, z);
+        const bead = mesh(beadGeometry, bandMetal);
+        bead.position.set(Math.sin(a) * beadR, Math.cos(a) * beadR - 0.25, tipZ);
       }
     }
     // Follow raised shoulders instead of putting the diamonds underneath
